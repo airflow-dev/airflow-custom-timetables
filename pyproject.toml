@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "airflow-custom-timetables"
+version = "0.1.0"
+description = "Custom Apache Airflow timetables for advanced scheduling"
+readme = "README.md"
+requires-python = ">=3.8"
+authors = [
+    { name = "Jorge Marquez" },
+]
+maintainers = [
+    { name = "airflow-dev" },
+]
+keywords = ["airflow", "timetable", "scheduler"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: Apache Airflow",
+    "Programming Language :: Python :: 3",
+    "Topic :: System :: Monitoring",
+]
+# apache-airflow and pendulum are expected to already be present in the
+# Airflow environment. Do not pull Airflow in as a pip dependency.
+dependencies = []
+
+[project.optional-dependencies]
+holidays = ["holidays>=0.41"]
+
+[project.urls]
+Homepage = "https://github.com/airflow-dev/airflow-custom-timetables"
+Source = "https://github.com/airflow-dev/airflow-custom-timetables"
+Upstream = "https://github.com/jmmarqu/airflow-custom-timetables"
+
+[project.entry-points."airflow.plugins"]
+custom_interval_timetables = "custom_timetables:CustomIntervalTimetables"
+
+[tool.setuptools]
+py-modules = ["custom_timetables"]
