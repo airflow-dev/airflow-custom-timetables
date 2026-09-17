@@ -24,6 +24,73 @@ from typing import Optional
 # pendulum.datetime is a factory (creates DateTime). It has no .now(); use pendulum.now(tz).
 
 
+def _load_holiday_calendar(country: str, subdiv: Optional[str], observed: bool, year: int):
+    """Build a vacanza `holidays` calendar. Imported only when country= is set."""
+    try:
+        import holidays
+    except ImportError as exc:
+        raise ImportError(
+            "country= requires the 'holidays' package. Install it with: pip install holidays"
+        ) from exc
+    return holidays.country_holidays(
+        country,
+        subdiv=subdiv or None,
+        years=year,
+        observed=observed,
+    )
+
+
+def _is_non_working_day(dt: DateTime, calendar=None) -> bool:
+    """Weekend, plus public holidays when a holidays calendar is supplied.
+
+    pendulum day_of_week is Monday=0 … Sunday=6, same numbering as holidays.weekend.
+    With no calendar, Saturday/Sunday only (today's behaviour).
+    """
+    if calendar is None:
+        return dt.day_of_week >= 5
+    weekend = getattr(calendar, "weekend", None) or {5, 6}
+    if dt.day_of_week in weekend:
+        return True
+    return dt.date() in calendar
+
+
+class _OptionalHolidayMixin:
+    """Optional ISO country/subdiv holiday calendar. Not serialized as an object."""
+
+    country: Optional[str]
+    subdiv: Optional[str]
+    observed: bool
+
+    def _holiday_fields(self):
+        return {
+            "country": self.country,
+            "subdiv": self.subdiv,
+            "observed": self.observed,
+        }
+
+    def _calendar_for_year(self, year: int):
+        if not self.country:
+            return None
+        cache = getattr(self, "_holiday_cache", None)
+        if cache is None:
+            cache = {}
+            self._holiday_cache = cache
+        cal = cache.get(year)
+        if cal is None:
+            cal = _load_holiday_calendar(self.country, self.subdiv, self.observed, year)
+            cache[year] = cal
+        return cal
+
+    def _is_non_working(self, dt: DateTime) -> bool:
+        return _is_non_working_day(dt, self._calendar_for_year(dt.year))
+
+    def _holiday_description_suffix(self) -> str:
+        if not self.country:
+            return ""
+        loc = self.country if not self.subdiv else f"{self.country}/{self.subdiv}"
+        return f", {loc} holidays"
+
+
 class MonthlyLastDay(Timetable):
     """
     Timetable for scheduling a DAG to run on the last day of each month at a specific hour, minute, and second.
@@ -1251,7 +1318,7 @@ class EveryNDays(Timetable):
         end = start.add(days=self.interval_days)
         return DagRunInfo.interval(start, end)
 
-class BusinessDayOfMonth(Timetable):
+class BusinessDayOfMonth(_OptionalHolidayMixin, Timetable):
     """
     Timetable for scheduling a DAG to run on the Nth or last business (weekday) day of each month at a specific hour/minute.
 
@@ -1261,30 +1328,54 @@ class BusinessDayOfMonth(Timetable):
     - `minute` (`int`): Minute of the hour (0-59)
     - `second` (`int`): Second of the minute (default 0)
     - `tz` (`str`): Timezone string (default "America/New_York")
+    - `country` (`str`, optional): ISO 3166-1 country for the `holidays` calendar.
+      Default `None` keeps weekends-only (no extra dependency).
+    - `subdiv` (`str`, optional): ISO 3166-2 subdivision (e.g. `ENG`, `NY`).
+    - `observed` (`bool`): Skip observed-on-weekday substitutes. Default True.
 
     **Examples:**
     First business day of each month at 09:00:
         BusinessDayOfMonth(n=1, hour=9, minute=0)
     Last business day of each month at 17:00:
         BusinessDayOfMonth(n=-1, hour=17, minute=0)
+    First working day in England (bank holidays skipped):
+        BusinessDayOfMonth(n=1, hour=9, tz="Europe/London", country="GB", subdiv="ENG")
     """
-    def __init__(self, n: int = 1, hour: int = 0, minute: int = 0, tz: str = "America/New_York", second: int = 0):
+    def __init__(
+        self,
+        n: int = 1,
+        hour: int = 0,
+        minute: int = 0,
+        tz: str = "America/New_York",
+        second: int = 0,
+        country: Optional[str] = None,
+        subdiv: Optional[str] = None,
+        observed: bool = True,
+    ):
         self.n = n
         self.tz = tz
         self.hour = hour
         self.minute = minute
         self.second = second
+        self.country = country
+        self.subdiv = subdiv
+        self.observed = observed
         nth_str = {1: "First", 2: "Second", 3: "Third", 4: "Fourth", -1: "Last"}.get(n, f"{n}th")
-        self.description = f" Monthly, {nth_str} business day at {self.hour:02d}:{self.minute:02d} ({self.tz})"
+        self.description = (
+            f" Monthly, {nth_str} business day at {self.hour:02d}:{self.minute:02d} "
+            f"({self.tz}{self._holiday_description_suffix()})"
+        )
 
     def serialize(self):
-        return {
+        data = {
             "n": self.n,
             "tz": self.tz,
             "hour": self.hour,
             "minute": self.minute,
             "second": self.second,
         }
+        data.update(self._holiday_fields())
+        return data
 
     @classmethod
     def deserialize(cls, data):
@@ -1294,6 +1385,9 @@ class BusinessDayOfMonth(Timetable):
             hour=data.get("hour", 0),
             minute=data.get("minute", 0),
             second=data.get("second", 0),
+            country=data.get("country"),
+            subdiv=data.get("subdiv"),
+            observed=data.get("observed", True),
         )
 
     def _get_nth_business_day(self, year: int, month: int):
@@ -1302,7 +1396,7 @@ class BusinessDayOfMonth(Timetable):
             dt = datetime(year, month, 1, tz=tz)
             count = 0
             while True:
-                if dt.day_of_week < 5:  # Monday=0, ..., Friday=4
+                if not self._is_non_working(dt):
                     count += 1
                     if count == self.n:
                         break
@@ -1315,7 +1409,7 @@ class BusinessDayOfMonth(Timetable):
                 dt = datetime(year, month + 1, 1, tz=tz).subtract(days=1)
             count = -1
             while True:
-                if dt.day_of_week < 5:
+                if not self._is_non_working(dt):
                     if self.n == count:
                         break
                     count -= 1
@@ -1368,35 +1462,59 @@ class BusinessDayOfMonth(Timetable):
         end = start.add(hours=1)
         return DagRunInfo.interval(start, end)
 
-class MonthlyLastDayExceptWeekend(Timetable):
+class MonthlyLastDayExceptWeekend(_OptionalHolidayMixin, Timetable):
     """
     Timetable for scheduling a DAG to run on the last day of each month at a specific hour/minute,
     but if the last day is a Saturday or Sunday, move to the previous Friday.
+
+    When `country` is set, public holidays are skipped the same way as weekends.
 
     **Parameters:**
     - `hour` (`int`): Hour of the day (0-23)
     - `minute` (`int`): Minute of the hour (0-59)
     - `second` (`int`): Second of the minute (default 0)
     - `tz` (`str`): Timezone string (default "America/New_York")
+    - `country` (`str`, optional): ISO 3166-1 country for the `holidays` calendar.
+    - `subdiv` (`str`, optional): ISO 3166-2 subdivision (e.g. `ENG`, `NY`).
+    - `observed` (`bool`): Skip observed-on-weekday substitutes. Default True.
 
     **Examples:**
     Last day of each month at 18:00, or previous Friday if weekend:
-        LastDayExceptWeekend(hour=18, minute=0)
+        MonthlyLastDayExceptWeekend(hour=18, minute=0)
+    Same, also skipping US federal holidays:
+        MonthlyLastDayExceptWeekend(hour=18, country="US")
     """
-    def __init__(self, hour: int = 0, minute: int = 0, tz: str = "America/New_York", second: int = 0):
+    def __init__(
+        self,
+        hour: int = 0,
+        minute: int = 0,
+        tz: str = "America/New_York",
+        second: int = 0,
+        country: Optional[str] = None,
+        subdiv: Optional[str] = None,
+        observed: bool = True,
+    ):
         self.tz = tz
         self.hour = hour
         self.minute = minute
         self.second = second
-        self.description = f" Monthly, Last day (or previous Friday if weekend) at {self.hour:02d}:{self.minute:02d} ({self.tz})"
+        self.country = country
+        self.subdiv = subdiv
+        self.observed = observed
+        self.description = (
+            f" Monthly, Last day (or previous Friday if weekend"
+            f"{self._holiday_description_suffix()}) at {self.hour:02d}:{self.minute:02d} ({self.tz})"
+        )
 
     def serialize(self):
-        return {
+        data = {
             "tz": self.tz,
             "hour": self.hour,
             "minute": self.minute,
             "second": self.second,
         }
+        data.update(self._holiday_fields())
+        return data
 
     @classmethod
     def deserialize(cls, data):
@@ -1405,6 +1523,9 @@ class MonthlyLastDayExceptWeekend(Timetable):
             hour=data.get("hour", 0),
             minute=data.get("minute", 0),
             second=data.get("second", 0),
+            country=data.get("country"),
+            subdiv=data.get("subdiv"),
+            observed=data.get("observed", True),
         )
 
     def _get_last_day(self, year: int, month: int):
@@ -1414,8 +1535,8 @@ class MonthlyLastDayExceptWeekend(Timetable):
         else:
             next_month = datetime(year, month + 1, 1, tz=tz)
         last_day = next_month.subtract(days=1)
-        # If last day is Saturday (5) or Sunday (6), move to previous Friday (4)
-        while last_day.day_of_week > 4:
+        # Weekend (or public holiday when country= is set) → previous working day
+        while self._is_non_working(last_day):
             last_day = last_day.subtract(days=1)
         return last_day.replace(hour=self.hour, minute=self.minute, second=self.second, microsecond=0)
 
