@@ -83,6 +83,12 @@ class TestBusinessDayOfMonthHolidays(unittest.TestCase):
         day = tt._get_nth_business_day(2026, 1)
         self.assertEqual((day.year, day.month, day.day), (2026, 1, 2))
 
+    def test_us_last_business_day_skips_memorial_day(self):
+        # 31 May 2021 was Monday Memorial Day. Last working day is Friday 28 May.
+        tt = BusinessDayOfMonth(n=-1, hour=17, tz="America/New_York", country="US")
+        day = tt._get_nth_business_day(2021, 5)
+        self.assertEqual((day.year, day.month, day.day), (2021, 5, 28))
+
     def test_serialize_round_trip(self):
         tt = BusinessDayOfMonth(
             n=1, hour=9, tz="Europe/London", country="GB", subdiv="ENG", observed=False
