@@ -7,6 +7,32 @@ Originally written by **[Jorge Marquez](https://github.com/jmmarqu)** ([jmmarqu/
 
 ---
 
+## Install
+
+The repo is public. Add one of these lines to `requirements.txt` (or `pyproject.toml` dependencies):
+
+```txt
+airflow-custom-timetables[holidays] @ git+https://github.com/airflow-dev/airflow-custom-timetables.git
+```
+
+Pin a commit if you need a frozen install:
+
+```txt
+airflow-custom-timetables[holidays] @ git+https://github.com/airflow-dev/airflow-custom-timetables.git@<sha>
+```
+
+Then `pip install -r requirements.txt` (or however you build the Airflow image). Import path is unchanged:
+
+```python
+from custom_timetables import BusinessDayOfMonth
+```
+
+Installing the package registers the Airflow plugin `CustomIntervalTimetables` via the `airflow.plugins` entry point, so you do **not** need to copy this file into `$AIRFLOW_HOME/plugins`. Drop it in `plugins/` **or** pip-install it — not both.
+
+`apache-airflow` is not a pip dependency of this package; install it into an Airflow environment that already has Airflow and pendulum. The `[holidays]` extra pulls in PyPI [`holidays`](https://pypi.org/project/holidays/) for optional country calendars.
+
+---
+
 ## How to Use
 
 1. **Import the desired timetable class in your DAG file:**
@@ -67,10 +93,10 @@ Originally written by **[Jorge Marquez](https://github.com/jmmarqu)** ([jmmarqu/
 
 ## Optional holiday calendars
 
-Install the extra yourself (this plugin still has no packaging extras):
+Install with the extra (or `pip install holidays` next to the plugin):
 
 ```bash
-pip install holidays
+pip install "airflow-custom-timetables[holidays] @ git+https://github.com/airflow-dev/airflow-custom-timetables.git"
 ```
 
 ```python
