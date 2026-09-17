@@ -3,6 +3,8 @@
 This package provides a set of custom Airflow timetables for advanced scheduling scenarios.
 Below you'll find usage instructions and examples for each timetable class.
 
+Originally written by **[Jorge Marquez](https://github.com/jmmarqu)** ([jmmarqu/airflow-custom-timetables](https://github.com/jmmarqu/airflow-custom-timetables)). This fork keeps that work going (pendulum `.now` fix, optional holiday calendars).
+
 ---
 
 ## How to Use
