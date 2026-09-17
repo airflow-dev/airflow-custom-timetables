@@ -46,6 +46,7 @@ Below you'll find usage instructions and examples for each timetable class.
 | Every N days                             | `EveryNDays`                  | `EveryNDays(interval_days=10, hour=7, minute=0)`                            | Every 10 days at 07:00                             |
 | Nth business day of month                | `BusinessDayOfMonth`          | `BusinessDayOfMonth(n=1, hour=9, minute=0)`                                 | 1st business day of each month at 09:00            |
 | Last business day of month               | `BusinessDayOfMonth`          | `BusinessDayOfMonth(n=-1, hour=17, minute=0)`                               | Last business day of each month at 17:00           |
+| First working day (England bank holidays)| `BusinessDayOfMonth`          | `BusinessDayOfMonth(n=1, hour=9, tz="Europe/London", country="GB", subdiv="ENG")` | 1st working day, skipping weekends and England holidays |
 | Last day except weekend (move to Friday) | `MonthlyLastDayExceptWeekend` | `MonthlyLastDayExceptWeekend(hour=18, minute=0)`                            | Last day of month at 18:00, or previous Friday     |
 | Cron expression                          | `CronTimetable`               | `CronTimetable("0 9 15 * *", timezone="America/New_York")`                  | 15th of every month at 09:00 (or any cron pattern) |
 | Every N hours/minutes                    | `EveryNInterval`              | `EveryNInterval(interval_hours=6)<br>``EveryNInterval(interval_minutes=45)` | Every 6 hours or every 45 minutes                  |
@@ -58,6 +59,37 @@ Below you'll find usage instructions and examples for each timetable class.
 - For weekday parameters: Monday=0, ..., Sunday=6.
 - For `MonthlyWeekdayOccurrence` and `YearlyWeekdayOccurrence`, `n=-1` means "last" occurrence.
 - For `BusinessDayOfMonth`, `n=-1` means "last business day".
+- `BusinessDayOfMonth` and `MonthlyLastDayExceptWeekend` accept optional `country` / `subdiv` / `observed` (ISO 3166, via PyPI [`holidays`](https://pypi.org/project/holidays/)). Default `country=None` is weekends only and does not import `holidays`. Example: `country="GB", subdiv="ENG"` for England bank holidays. US state: `country="US", subdiv="NY"`. The calendar is not stored on the timetable — only those three kwargs are serialized.
+
+---
+
+## Optional holiday calendars
+
+Install the extra yourself (this plugin still has no packaging extras):
+
+```bash
+pip install holidays
+```
+
+```python
+from custom_timetables import BusinessDayOfMonth, MonthlyLastDayExceptWeekend
+
+# Weekends only — same as before. holidays is not imported.
+BusinessDayOfMonth(n=1, hour=9, tz="Europe/London")
+
+# Skip England bank holidays as well as Saturday/Sunday.
+BusinessDayOfMonth(
+    n=1, hour=9, tz="Europe/London",
+    country="GB", subdiv="ENG",
+)
+
+# Last weekday of the month, walking back over US federal holidays too.
+MonthlyLastDayExceptWeekend(hour=18, country="US")
+```
+
+`observed=True` (the library default) also skips substitute weekdays (e.g. Monday when Christmas is a Sunday). Pass `observed=False` to use the calendar date only.
+
+When a calendar is loaded, that country's weekend set is used (`holidays` `calendar.weekend`) instead of hardcoded Monday–Friday. Countries with a Friday–Saturday weekend therefore skip those days.
 
 ---
 
